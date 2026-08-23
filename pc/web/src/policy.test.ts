@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   acceptBindingMutation,
+  acceptDshApply,
   bindingRevisionForCas,
   dispatchAllowed,
   assertNoBrowserAuthorityTarget,
@@ -64,6 +65,56 @@ describe("binding mutation gates", () => {
         expectedRevision: 3,
         currentRevision: 3,
         perRequestOverride: true,
+      }),
+    ).toMatchObject({ ok: false });
+  });
+
+  it("applies only an active dsh catalog model while web is ACTIVE", () => {
+    expect(
+      acceptDshApply({
+        agent: "dsh",
+        bindingStatus: "active",
+        modelId: "grok-4.6",
+        catalogModelIds: ["deepseek-v4-flash", "grok-4.6"],
+        runtimeState: "ACTIVE",
+        processAlive: true,
+      }),
+    ).toEqual({ ok: true });
+    expect(
+      acceptDshApply({
+        agent: "pi",
+        bindingStatus: "active",
+        modelId: "grok-4.6",
+        runtimeState: "ACTIVE",
+        processAlive: true,
+      }),
+    ).toMatchObject({ ok: false });
+    expect(
+      acceptDshApply({
+        agent: "dsh",
+        bindingStatus: "revoked",
+        modelId: "grok-4.6",
+        runtimeState: "ACTIVE",
+        processAlive: true,
+      }),
+    ).toMatchObject({ ok: false });
+    expect(
+      acceptDshApply({
+        agent: "dsh",
+        bindingStatus: "active",
+        modelId: "grok-4.6",
+        catalogModelIds: ["deepseek-v4-flash"],
+        runtimeState: "ACTIVE",
+        processAlive: true,
+      }),
+    ).toMatchObject({ ok: false });
+    expect(
+      acceptDshApply({
+        agent: "dsh",
+        bindingStatus: "active",
+        modelId: "grok-4.6",
+        runtimeState: "INACTIVE",
+        processAlive: false,
       }),
     ).toMatchObject({ ok: false });
   });

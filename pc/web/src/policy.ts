@@ -118,6 +118,36 @@ export function acceptBindingMutation(input: {
   return { ok: true };
 }
 
+/** Cos Bindings "Apply to running dsh" — fail-closed when web is down or model missing. */
+export function acceptDshApply(input: {
+  agent?: string;
+  bindingStatus?: string;
+  modelId?: string;
+  catalogModelIds?: string[];
+  runtimeState?: string;
+  processAlive?: boolean;
+}): { ok: true } | { ok: false; reason: string } {
+  const agent = String(input.agent ?? "");
+  if (agent !== "dsh" && agent !== "agent://personal/dsh") {
+    return { ok: false, reason: "Apply is only for the dsh agent. Pi has its own binding." };
+  }
+  if (input.bindingStatus !== "active") {
+    return { ok: false, reason: "No active dsh binding to apply." };
+  }
+  const modelId = String(input.modelId ?? "").trim();
+  if (!modelId) {
+    return { ok: false, reason: "dsh binding has no model id." };
+  }
+  const catalog = input.catalogModelIds ?? [];
+  if (catalog.length > 0 && !catalog.includes(modelId)) {
+    return { ok: false, reason: "Bound model is not in this account catalog." };
+  }
+  if (input.runtimeState !== "ACTIVE" || input.processAlive === false) {
+    return { ok: false, reason: "Native dsh web is not ACTIVE. Start cognitive dsh web first." };
+  }
+  return { ok: true };
+}
+
 export function dispatchAllowed(input: {
   accountStatus?: string;
   bindingStatus?: string;

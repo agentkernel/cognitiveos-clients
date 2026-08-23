@@ -4,6 +4,7 @@ import { issueChannelSession, readJson, rejectCallerHeaderInjection } from "./ap
 import { AGENT_IDENTITY_KEYS, mergeIdentities, type AgentIdentities } from "./identities";
 import {
   acceptBindingMutation,
+  acceptDshApply,
   bindingRevisionForCas,
   displayCost,
   dispatchAllowed,
@@ -787,13 +788,18 @@ function BindingsPage() {
   const [bindings, setBindings] = useState<LoadState>({ status: "loading" });
   const [accounts, setAccounts] = useState<LoadState>({ status: "loading" });
   const [models, setModels] = useState<LoadState>({ status: "empty" });
+  const [runtime, setRuntime] = useState<LoadState>({ status: "empty" });
+  const [selected, setSelected] = useState<LoadState>({ status: "empty" });
   const [agent, setAgent] = useState("pi");
   const [accountId, setAccountId] = useState("");
   const [message, setMessage] = useState("At most one active fixed account+model per Agent.");
+  const [applying, setApplying] = useState(false);
 
   async function refresh() {
     setBindings(await load("/management/agent-bindings", "management"));
     setAccounts(await load("/management/providers/accounts", "management"));
+    setRuntime(await load("/personal/dsh/runtime", "management"));
+    setSelected(await load("/provider/v1/dsh/selected-model", "management"));
   }
 
   useEffect(() => {
@@ -887,6 +893,47 @@ function BindingsPage() {
     await refresh();
   }
 
+  async function applyDsh() {
+    const dshRow = activeRows.find(
+      (row) => String(row.agent).endsWith("dsh") || String(row.agent) === "dsh",
+    );
+    const runtimeBody = asRecord(runtime.body);
+    const catalogIds = modelRows.map((model) => String(model.model_id));
+    const sameAccountCatalog =
+      dshRow && accountId && String(dshRow.account_id) === accountId && catalogIds.length > 0;
+    const gate = acceptDshApply({
+      agent: "dsh",
+      bindingStatus: dshRow ? String(dshRow.status) : undefined,
+      modelId: dshRow ? String(dshRow.model_id) : undefined,
+      catalogModelIds: sameAccountCatalog ? catalogIds : undefined,
+      runtimeState: runtimeBody.state ? String(runtimeBody.state) : undefined,
+      processAlive: runtimeBody.process_alive === undefined ? undefined : Boolean(runtimeBody.process_alive),
+    });
+    if (!gate.ok) {
+      setMessage(gate.reason);
+      return;
+    }
+    setApplying(true);
+    const result = await readJson("/personal/dsh/runtime", "management", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        schema_version: 1,
+        surface: "personal-dsh-runtime",
+        op: "apply",
+        expected_revision: bindingRevisionForCas(dshRow),
+      }),
+    });
+    setApplying(false);
+    const applied = asRecord(result.body);
+    setMessage(
+      result.ok
+        ? `Applied ${String(applied.applied_model ?? dshRow?.model_id)}. Path B/chat uses this Cos binding. Native dsh Models may still list DeepSeek.`
+        : `HTTP ${result.status} ${String(applied.code ?? "")}`,
+    );
+    await refresh();
+  }
+
   const rows = asList(bindings.body, ["bindings", "items"]).map(asRecord);
   const activeRows = rows.filter((row) => String(row.status) === "active");
   const accountRows = asList(accounts.body, ["accounts", "items"]).map(asRecord);
@@ -895,6 +942,23 @@ function BindingsPage() {
     (row) => String(row.agent).endsWith(agent) || String(row.agent) === agent,
   );
   const expectedDefault = bindingRevisionForCas(current);
+  const dshRow = activeRows.find(
+    (row) => String(row.agent).endsWith("dsh") || String(row.agent) === "dsh",
+  );
+  const applyGate = acceptDshApply({
+    agent: "dsh",
+    bindingStatus: dshRow ? String(dshRow.status) : undefined,
+    modelId: dshRow ? String(dshRow.model_id) : undefined,
+    catalogModelIds:
+      dshRow && accountId && String(dshRow.account_id) === accountId && modelRows.length > 0
+        ? modelRows.map((model) => String(model.model_id))
+        : undefined,
+    runtimeState: asRecord(runtime.body).state ? String(asRecord(runtime.body).state) : undefined,
+    processAlive:
+      asRecord(runtime.body).process_alive === undefined
+        ? undefined
+        : Boolean(asRecord(runtime.body).process_alive),
+  });
 
   return (
     <>
@@ -957,6 +1021,26 @@ function BindingsPage() {
         </label>
         <button type="submit">Confirm fixed binding</button>
       </form>
+      <section>
+        <h3>Apply Cos model to running dsh</h3>
+        <p className="muted">
+          Native dsh Models still lists DeepSeek catalog names. Chat and Path B use the Cos
+          dsh binding (
+          <code>{String(asRecord(selected.body).selected_model ?? "unset")}</code>
+          , digest{" "}
+          <code>{String(asRecord(selected.body).selected_snapshot_digest ?? "none")}</code>
+          ). Runtime{" "}
+          <code>{String(asRecord(runtime.body).state ?? "unknown")}</code>.
+        </p>
+        <button
+          type="button"
+          disabled={applying || !applyGate.ok}
+          onClick={() => void applyDsh()}
+        >
+          Apply to running dsh
+        </button>
+        {!applyGate.ok ? <p className="muted">{applyGate.reason}</p> : null}
+      </section>
       <p role="status">{message}</p>
       <table>
         <caption>Active fixed bindings (revoked rows are omitted so Remove/set can proceed)</caption>
