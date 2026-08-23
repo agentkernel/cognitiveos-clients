@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { HashRouter, NavLink, Navigate, Route, Routes, useParams } from "react-router-dom";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { HashRouter, NavLink, Route, Routes, useParams } from "react-router-dom";
 import { issueChannelSession, readJson, rejectCallerHeaderInjection } from "./api";
 import { AGENT_IDENTITY_KEYS, mergeIdentities, type AgentIdentities } from "./identities";
 import {
@@ -29,7 +29,7 @@ type LoadState = {
   message?: string;
 };
 
-const NAV = [
+export const NAV = [
   ["/", "Home"],
   ["/agents", "Agents"],
   ["/providers", "Providers"],
@@ -103,10 +103,25 @@ function secretPresence(value: unknown): string {
   return "present";
 }
 
+const SessionTick = createContext({ tick: 0, bump: () => {} });
+
+function SessionScope({ children }: { children: React.ReactNode }) {
+  const [tick, setTick] = useState(0);
+  const bump = useCallback(() => setTick((value) => value + 1), []);
+  return <SessionTick.Provider value={{ tick, bump }}>{children}</SessionTick.Provider>;
+}
+
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="shell">
-      <a className="skip" href="#main">
+      <a
+        className="skip"
+        href="#main"
+        onClick={(event) => {
+          event.preventDefault();
+          document.getElementById("main")?.focus();
+        }}
+      >
         Skip to content
       </a>
       <nav className="side" aria-label="Primary">
@@ -125,25 +140,40 @@ function Shell({ children }: { children: React.ReactNode }) {
           </li>
         </ul>
       </nav>
-      <main id="main">{children}</main>
+      <main id="main" tabIndex={-1}>
+        {children}
+      </main>
     </div>
   );
 }
 
 function RequireSession({
   channel,
+  title,
   children,
 }: {
   channel: "management" | "task";
+  title: string;
   children: React.ReactNode;
 }) {
+  const { tick } = useContext(SessionTick);
+  void tick;
   if (!sessionHasChannel(channel)) {
-    return <Navigate to="/session" replace />;
+    return (
+      <section data-page="session-gate">
+        <h2>{title}</h2>
+        <p className="warn" role="status">
+          This page needs a {channel} session. Sidebar navigation still changes the view.
+        </p>
+        <SessionForm />
+      </section>
+    );
   }
   return <>{children}</>;
 }
 
-function SessionPage() {
+function SessionForm() {
+  const { bump } = useContext(SessionTick);
   const [secret, setSecret] = useState("");
   const [principal, setPrincipal] = useState("principal://local/owner");
   const [message, setMessage] = useState("Session tokens stay in memory only.");
@@ -166,8 +196,41 @@ function SessionPage() {
         task.ok ? "ready" : `HTTP ${task.status}`
       }. Bootstrap discarded.`,
     );
+    bump();
   }
 
+  return (
+    <form onSubmit={(event) => void issue(event)}>
+      <label>
+        Principal
+        <input value={principal} onChange={(event) => setPrincipal(event.target.value)} />
+      </label>
+      <label>
+        Bootstrap secret
+        <input
+          type="password"
+          autoComplete="off"
+          value={secret}
+          onChange={(event) => setSecret(event.target.value)}
+        />
+      </label>
+      <button type="submit">Issue management and Task sessions</button>
+      <button
+        type="button"
+        onClick={() => {
+          clearSession();
+          setMessage("Session cleared.");
+          bump();
+        }}
+      >
+        Clear memory session
+      </button>
+      <p role="status">{message}</p>
+    </form>
+  );
+}
+
+function SessionPage() {
   return (
     <>
       <h2>Session bootstrap</h2>
@@ -175,26 +238,7 @@ function SessionPage() {
         Paste the daemon bootstrap secret once. It is never written to localStorage,
         sessionStorage, IndexedDB, the URL, or exported state.
       </p>
-      <form onSubmit={issue}>
-        <label>
-          Principal
-          <input value={principal} onChange={(event) => setPrincipal(event.target.value)} />
-        </label>
-        <label>
-          Bootstrap secret
-          <input
-            type="password"
-            autoComplete="off"
-            value={secret}
-            onChange={(event) => setSecret(event.target.value)}
-          />
-        </label>
-        <button type="submit">Issue management and Task sessions</button>
-        <button type="button" onClick={() => { clearSession(); setMessage("Session cleared."); }}>
-          Clear memory session
-        </button>
-      </form>
-      <p role="status">{message}</p>
+      <SessionForm />
     </>
   );
 }
@@ -1242,83 +1286,85 @@ function ResourcesPage() {
 export function App() {
   return (
     <HashRouter>
-      <Shell>
-        <Routes>
-          <Route path="/session" element={<SessionPage />} />
-          <Route
-            path="/"
-            element={
-              <RequireSession channel="management">
-                <HomePage />
-              </RequireSession>
-            }
-          />
-          <Route
-            path="/agents"
-            element={
-              <RequireSession channel="management">
-                <AgentsPage />
-              </RequireSession>
-            }
-          />
-          <Route
-            path="/agents/:id"
-            element={
-              <RequireSession channel="management">
-                <AgentDetailPage />
-              </RequireSession>
-            }
-          />
-          <Route
-            path="/providers"
-            element={
-              <RequireSession channel="management">
-                <ProvidersPage />
-              </RequireSession>
-            }
-          />
-          <Route
-            path="/providers/:id"
-            element={
-              <RequireSession channel="management">
-                <ProviderDetailPage />
-              </RequireSession>
-            }
-          />
-          <Route
-            path="/bindings"
-            element={
-              <RequireSession channel="management">
-                <BindingsPage />
-              </RequireSession>
-            }
-          />
-          <Route
-            path="/tasks"
-            element={
-              <RequireSession channel="task">
-                <TasksPage />
-              </RequireSession>
-            }
-          />
-          <Route
-            path="/activity"
-            element={
-              <RequireSession channel="management">
-                <ActivityPage />
-              </RequireSession>
-            }
-          />
-          <Route
-            path="/resources"
-            element={
-              <RequireSession channel="management">
-                <ResourcesPage />
-              </RequireSession>
-            }
-          />
-        </Routes>
-      </Shell>
+      <SessionScope>
+        <Shell>
+          <Routes>
+            <Route path="/session" element={<SessionPage />} />
+            <Route
+              path="/"
+              element={
+                <RequireSession channel="management" title="Home">
+                  <HomePage />
+                </RequireSession>
+              }
+            />
+            <Route
+              path="/agents"
+              element={
+                <RequireSession channel="management" title="Agents">
+                  <AgentsPage />
+                </RequireSession>
+              }
+            />
+            <Route
+              path="/agents/:id"
+              element={
+                <RequireSession channel="management" title="Agent detail">
+                  <AgentDetailPage />
+                </RequireSession>
+              }
+            />
+            <Route
+              path="/providers"
+              element={
+                <RequireSession channel="management" title="Providers">
+                  <ProvidersPage />
+                </RequireSession>
+              }
+            />
+            <Route
+              path="/providers/:id"
+              element={
+                <RequireSession channel="management" title="Provider account">
+                  <ProviderDetailPage />
+                </RequireSession>
+              }
+            />
+            <Route
+              path="/bindings"
+              element={
+                <RequireSession channel="management" title="Agent Provider bindings">
+                  <BindingsPage />
+                </RequireSession>
+              }
+            />
+            <Route
+              path="/tasks"
+              element={
+                <RequireSession channel="task" title="Tasks">
+                  <TasksPage />
+                </RequireSession>
+              }
+            />
+            <Route
+              path="/activity"
+              element={
+                <RequireSession channel="management" title="Activity">
+                  <ActivityPage />
+                </RequireSession>
+              }
+            />
+            <Route
+              path="/resources"
+              element={
+                <RequireSession channel="management" title="Resources">
+                  <ResourcesPage />
+                </RequireSession>
+              }
+            />
+          </Routes>
+        </Shell>
+      </SessionScope>
     </HashRouter>
   );
 }
