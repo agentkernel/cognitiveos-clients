@@ -928,7 +928,7 @@ function BindingsPage() {
     const applied = asRecord(result.body);
     setMessage(
       result.ok
-        ? `Applied ${String(applied.applied_model ?? dshRow?.model_id)}. Path B/chat uses this Cos binding. Native dsh Models may still list DeepSeek.`
+        ? `Applied ${String(applied.applied_model ?? dshRow?.model_id)}. Conversation and Models show this Cos model after Cos-installed web restart. Path B uses the bound account (never DeepSeek for grok).`
         : `HTTP ${result.status} ${String(applied.code ?? "")}`,
     );
     await refresh();
@@ -1024,12 +1024,12 @@ function BindingsPage() {
       <section>
         <h3>Apply Cos model to running dsh</h3>
         <p className="muted">
-          Native dsh Models still lists DeepSeek catalog names. Chat and Path B use the Cos
-          dsh binding (
+          Apply publishes the Cos dsh binding. Restart Cos-installed web
+          (`cognitive dsh apply`) so conversation and Models show{" "}
           <code>{String(asRecord(selected.body).selected_model ?? "unset")}</code>
-          , digest{" "}
+          {" "}(digest{" "}
           <code>{String(asRecord(selected.body).selected_snapshot_digest ?? "none")}</code>
-          ). Runtime{" "}
+          ). Chat uses that bound account — grok is never posted to DeepSeek. Runtime{" "}
           <code>{String(asRecord(runtime.body).state ?? "unknown")}</code>.
         </p>
         <button
