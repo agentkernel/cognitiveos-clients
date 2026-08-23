@@ -87,6 +87,18 @@ export function inferCompletionFromObservation(input: {
   return "unknown";
 }
 
+/** CAS revision the daemon uses: active binding only. Revoked/missing → 0. */
+export function bindingRevisionForCas(row: {
+  status?: unknown;
+  revision?: unknown;
+} | undefined): number {
+  if (!row || String(row.status ?? "") !== "active") {
+    return 0;
+  }
+  const revision = Number(row.revision ?? 0);
+  return Number.isFinite(revision) ? revision : 0;
+}
+
 export function acceptBindingMutation(input: {
   expectedRevision: number | undefined;
   currentRevision: number | undefined;

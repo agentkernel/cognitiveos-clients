@@ -74,6 +74,17 @@ describe("sidebar hash navigation", () => {
     });
   });
 
+  it("says the in-place bootstrap field is not a Provider LLM API key", async () => {
+    const { host, root } = await mountApp();
+    expect(host.querySelector("[data-page='session-gate']")).not.toBeNull();
+    expect(host.textContent).toMatch(/not a Provider LLM API key/i);
+    expect(host.textContent).toMatch(/local-bootstrap\.secret/);
+    expect(host.textContent).not.toMatch(/sk-live|ss:\/\//);
+    act(() => {
+      root.unmount();
+    });
+  });
+
   it("changes the hash and main heading for every sidebar item without a session", async () => {
     const { host, root } = await mountApp();
     for (const [to, label] of MENU) {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   acceptBindingMutation,
+  bindingRevisionForCas,
   dispatchAllowed,
   assertNoBrowserAuthorityTarget,
   containsSecretMaterial,
@@ -65,6 +66,12 @@ describe("binding mutation gates", () => {
         perRequestOverride: true,
       }),
     ).toMatchObject({ ok: false });
+  });
+
+  it("uses only an active binding revision for CAS", () => {
+    expect(bindingRevisionForCas(undefined)).toBe(0);
+    expect(bindingRevisionForCas({ status: "revoked", revision: 2 })).toBe(0);
+    expect(bindingRevisionForCas({ status: "active", revision: 3 })).toBe(3);
   });
 
   it("allows storing a binding on a revoked account but blocks dispatch", () => {

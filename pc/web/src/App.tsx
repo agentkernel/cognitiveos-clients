@@ -4,6 +4,7 @@ import { issueChannelSession, readJson, rejectCallerHeaderInjection } from "./ap
 import { AGENT_IDENTITY_KEYS, mergeIdentities, type AgentIdentities } from "./identities";
 import {
   acceptBindingMutation,
+  bindingRevisionForCas,
   displayCost,
   dispatchAllowed,
   escapeUntrustedText,
@@ -164,6 +165,7 @@ function RequireSession({
         <h2>{title}</h2>
         <p className="warn" role="status">
           This page needs a {channel} session. Sidebar navigation still changes the view.
+          Paste this daemon&apos;s bootstrap secret — not a Provider LLM API key.
         </p>
         <SessionForm />
       </section>
@@ -206,7 +208,7 @@ function SessionForm() {
         <input value={principal} onChange={(event) => setPrincipal(event.target.value)} />
       </label>
       <label>
-        Bootstrap secret
+        Daemon bootstrap secret
         <input
           type="password"
           autoComplete="off"
@@ -214,6 +216,10 @@ function SessionForm() {
           onChange={(event) => setSecret(event.target.value)}
         />
       </label>
+      <p className="muted">
+        File <code>local-bootstrap.secret</code> on this daemon. Not a Provider LLM API key
+        and not a SecretRef. The browser cannot read the file. Sessions stay in memory only.
+      </p>
       <button type="submit">Issue management and Task sessions</button>
       <button
         type="button"
@@ -235,8 +241,9 @@ function SessionPage() {
     <>
       <h2>Session bootstrap</h2>
       <p className="muted">
-        Paste the daemon bootstrap secret once. It is never written to localStorage,
-        sessionStorage, IndexedDB, the URL, or exported state.
+        Paste this daemon&apos;s <code>local-bootstrap.secret</code> once. It is not a
+        Provider LLM API key. It is never written to localStorage, sessionStorage,
+        IndexedDB, the URL, or exported state.
       </p>
       <SessionForm />
     </>
@@ -815,11 +822,15 @@ function BindingsPage() {
     const expectedRevision = Number(form.get("expected_revision"));
     const current = asList(bindings.body, ["bindings", "items"])
       .map(asRecord)
-      .find((row) => String(row.agent).endsWith(agent) || String(row.agent) === agent);
+      .find(
+        (row) =>
+          String(row.status) === "active" &&
+          (String(row.agent).endsWith(agent) || String(row.agent) === agent),
+      );
     const account = asList(accounts.body, ["accounts", "items"])
       .map(asRecord)
       .find((row) => row.id === accountId);
-    const currentRevision = current ? Number(current.revision ?? 0) : 0;
+    const currentRevision = bindingRevisionForCas(current);
     const gate = acceptBindingMutation({
       expectedRevision: Number.isFinite(expectedRevision) ? expectedRevision : undefined,
       currentRevision,
@@ -865,15 +876,25 @@ function BindingsPage() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ agent: target }),
     });
-    setMessage(result.ok ? "Binding removed." : `HTTP ${result.status}`);
+    const code = String(asRecord(result.body).code ?? "");
+    setMessage(
+      result.ok
+        ? "Binding removed. The next set uses expected revision 0."
+        : result.status === 404 || code === "PROVIDER_CONTROL_NOT_FOUND"
+          ? "No active binding to remove. Set a new model with expected revision 0."
+          : `HTTP ${result.status} ${code}`,
+    );
     await refresh();
   }
 
   const rows = asList(bindings.body, ["bindings", "items"]).map(asRecord);
+  const activeRows = rows.filter((row) => String(row.status) === "active");
   const accountRows = asList(accounts.body, ["accounts", "items"]).map(asRecord);
   const modelRows = asList(models.body, ["models", "items"]).map(asRecord);
-  const current = rows.find((row) => String(row.agent).endsWith(agent) || String(row.agent) === agent);
-  const expectedDefault = current ? Number(current.revision ?? 0) : 0;
+  const current = activeRows.find(
+    (row) => String(row.agent).endsWith(agent) || String(row.agent) === agent,
+  );
+  const expectedDefault = bindingRevisionForCas(current);
 
   return (
     <>
@@ -881,8 +902,11 @@ function BindingsPage() {
       <StateNote state={bindings} />
       <form onSubmit={submit}>
         <p className="muted">
-          One active <code>account + provider + model</code> per Agent. Stale expected_revision is
-          rejected by the daemon. Unbound, revoked, or degraded accounts cannot dispatch.
+          One active <code>account + provider + model</code> per Agent. Only an{" "}
+          <code>active</code> binding occupies <code>expected_revision</code>; a revoked
+          row is 0 so a new catalog model (including larger ids) can be set. Stale
+          expected_revision is rejected by the daemon. Unbound, revoked, or degraded
+          accounts cannot dispatch.
         </p>
         <label>
           Agent
@@ -935,7 +959,7 @@ function BindingsPage() {
       </form>
       <p role="status">{message}</p>
       <table>
-        <caption>Active fixed bindings</caption>
+        <caption>Active fixed bindings (revoked rows are omitted so Remove/set can proceed)</caption>
         <thead>
           <tr>
             <th>Agent</th>
@@ -948,7 +972,7 @@ function BindingsPage() {
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => {
+          {activeRows.map((row) => {
             const account = accountRows.find((item) => item.id === row.account_id);
             const callable = dispatchAllowed({
               accountStatus: account ? String(account.status) : "unknown",
