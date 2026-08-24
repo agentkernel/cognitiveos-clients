@@ -885,7 +885,9 @@ function BindingsPage() {
     const code = String(asRecord(result.body).code ?? "");
     setMessage(
       result.ok
-        ? "Binding removed. The next set uses expected revision 0."
+        ? target === "dsh" || String(target).endsWith("/dsh")
+          ? "dsh binding removed. Native Models drops that account catalog, including grok. Refresh dsh if the chrome is catching up."
+          : "Binding removed. The next set uses expected revision 0."
         : result.status === 404 || code === "PROVIDER_CONTROL_NOT_FOUND"
           ? "No active binding to remove. Set a new model with expected revision 0."
           : `HTTP ${result.status} ${code}`,
@@ -926,9 +928,13 @@ function BindingsPage() {
     });
     setApplying(false);
     const applied = asRecord(result.body);
+    const modelId = String(applied.applied_model ?? dshRow?.model_id);
+    const reloaded = applied.restart_performed === true;
     setMessage(
       result.ok
-        ? `Applied ${String(applied.applied_model ?? dshRow?.model_id)}. Conversation and Models show this Cos model after Cos-installed web restart. Path B uses the bound account (never DeepSeek for grok).`
+        ? reloaded
+          ? `Applied ${modelId}. Native Models now lists this bound account catalog. Path B uses the bound account (never DeepSeek for grok).`
+          : `Applied ${modelId}. Overlay written; refresh dsh after Cos web reloads. Path B uses the bound account (never DeepSeek for grok).`
         : `HTTP ${result.status} ${String(applied.code ?? "")}`,
     );
     await refresh();
